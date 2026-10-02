@@ -111,8 +111,10 @@ function viewFor(t, at) {
       status: p.status,
       revealed: p.revealed,
       createdAt: p.createdAt,
-      votedCount: p.voters.length,
-      eligibleCount: p.status === 'open' ? state.members.length : p.eligibleCount,
+      votedCount: p.voters.length + (p.proxyVoters || []).length,
+      eligibleCount: p.status === 'open' ? state.members.length + (p.proxyVoters || []).length : p.eligibleCount,
+      // Names only (never their choice), so the admin can see who's been added.
+      proxyVoters: p.proxyVoters || [],
       hasVoted: me ? p.voters.includes(me.id) : false,
       tally: p.revealed ? p.tally : null,
     })),
@@ -247,6 +249,7 @@ const routes = {
       createdAt: Date.now(),
       eligibleCount: state.members.length,
       voters: [],
+      proxyVoters: [],
       tally: Object.fromEntries(poll.options.map((o) => [o.id, 0])),
     });
   },
@@ -263,15 +266,36 @@ const routes = {
     poll.voters.sort(() => Math.random() - 0.5);
   },
 
+  // Admin casts a vote on behalf of someone who isn't present. Only their name
+  // is recorded (to prevent counting them twice); their choice goes into the
+  // same anonymous tally as everyone else's.
+  'POST /api/polls/proxy': (body) => {
+    const poll = need(state.polls.find((p) => p.id === body.pollId), 404, 'Vote not found.');
+    need(poll.status === 'open', 400, 'This vote is closed.');
+    const name = cleanText(body.voterName, 60);
+    need(name, 400, "Enter the absent person's name.");
+    const key = name.toLowerCase();
+    poll.proxyVoters = poll.proxyVoters || [];
+    need(!poll.proxyVoters.some((n) => n.toLowerCase() === key), 400, `${name} already has a vote counted.`);
+    need(
+      !state.members.some((m) => m.name.toLowerCase() === key),
+      400,
+      `${name} is in the room — they can vote for themselves.`
+    );
+    need(Object.hasOwn(poll.tally, body.optionId), 400, 'Pick one of the options.');
+    poll.proxyVoters.push(name);
+    poll.tally[body.optionId] += 1;
+  },
+
   'POST /api/polls/close': (body) => {
     const poll = need(state.polls.find((p) => p.id === body.pollId), 404, 'Vote not found.');
-    if (poll.status === 'open') poll.eligibleCount = state.members.length;
+    if (poll.status === 'open') poll.eligibleCount = state.members.length + (poll.proxyVoters || []).length;
     poll.status = 'closed';
   },
 
   'POST /api/polls/reveal': (body) => {
     const poll = need(state.polls.find((p) => p.id === body.pollId), 404, 'Vote not found.');
-    if (poll.status === 'open') poll.eligibleCount = state.members.length;
+    if (poll.status === 'open') poll.eligibleCount = state.members.length + (poll.proxyVoters || []).length;
     poll.status = 'closed';
     poll.revealed = true;
   },

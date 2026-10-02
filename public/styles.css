@@ -76,12 +76,12 @@ button.danger:hover { background: #fbd5d7; }
 button.small { padding: 6px 10px; font-size: 13px; border-radius: 10px; }
 button.tiny { padding: 3px 8px; font-size: 12px; border-radius: 8px; }
 
-input, textarea {
+input, textarea, select {
   font: inherit; color: var(--ink); width: 100%;
   border: 1.5px solid var(--line); background: #fff; border-radius: 12px; padding: 10px 14px;
   outline: none; transition: border-color .15s ease, box-shadow .15s ease;
 }
-input:focus, textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 4px var(--primary-soft); }
+input:focus, textarea:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 4px var(--primary-soft); }
 textarea { resize: vertical; min-height: 44px; }
 .row { display: flex; gap: 8px; align-items: center; }
 .row > input { flex: 1; min-width: 0; }
@@ -229,3 +229,9 @@ textarea { resize: vertical; min-height: 44px; }
   .options { grid-template-columns: 1fr; }
   .brand h1 { font-size: 18px; }
 }
+
+/* ---------- absent votes (admin) ---------- */
+.absent { margin-top: 16px; padding-top: 16px; border-top: 1px dashed var(--line); }
+.absent-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; margin-bottom: 8px; }
+.absent-form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; }
+@media (max-width: 560px) { .absent-form { grid-template-columns: 1fr; } }

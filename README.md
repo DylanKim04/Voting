@@ -16,6 +16,9 @@ send one link in the group chat, everyone joins with their name, and votes are c
 - **Notes on each person.** Tap 📝 under any name to read or add notes. You can delete your own notes, and admins can delete any note.
 - **Vote to remove someone.** Admins can start a "Remove X?" vote (Yes / No / Abstain). If the majority votes yes,
   a **Remove** button appears. Removed people are crossed out and can be restored.
+- **Votes for people who aren't there.** While a vote is open, admins can add a vote on behalf of
+  someone who's absent: type their name and pick their choice. The name is listed so nobody gets
+  counted twice, but the choice goes into the anonymous tally like everyone else's.
 - **Lock in a winner.** Once the votes settle, an admin locks one person in for the role. 👑
 - **Live updates.** Everyone's screen updates on its own. No refreshing.
 

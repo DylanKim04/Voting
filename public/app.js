@@ -198,6 +198,27 @@
           </div>
           <div class="progress"><div style="width:${pct}%"></div></div>
         </div>
+        ${S.isAdmin ? absentVoteForm(poll) : ''}
+      </div>`;
+  }
+
+  function absentVoteForm(poll) {
+    const names = poll.proxyVoters || [];
+    return `
+      <div class="absent">
+        <div class="absent-head">
+          <strong>🙋 Votes for people who aren't here</strong>
+          <span class="muted small-text">Only admins see this. Their choice is counted anonymously.</span>
+        </div>
+        <form class="absent-form" data-form="absent" data-poll="${poll.id}">
+          <input name="voterName" placeholder="Their name" maxlength="60" data-draft="absent:name:${poll.id}" value="${esc(ui.drafts[`absent:name:${poll.id}`] || '')}">
+          <select name="optionId" required>
+            <option value="">Their vote…</option>
+            ${poll.options.map((o) => `<option value="${o.id}">${esc(o.label)}</option>`).join('')}
+          </select>
+          <button class="small sage" type="submit">Add their vote</button>
+        </form>
+        ${names.length ? `<div class="member-list">${names.map((n) => `<span class="chip">✓ ${esc(n)}</span>`).join('')}</div>` : ''}
       </div>`;
   }
 
@@ -303,7 +324,7 @@
         <div class="row" style="justify-content:space-between;align-items:flex-start">
           <div>
             <h4>${esc(poll.title)}</h4>
-            <div class="muted small-text">${poll.type === 'position' ? `Round ${roundNumber(poll)} · ` : ''}${poll.votedCount} of ${poll.eligibleCount} voted · ${timeAgo(poll.createdAt)}</div>
+            <div class="muted small-text">${poll.type === 'position' ? `Round ${roundNumber(poll)} · ` : ''}${poll.votedCount} of ${poll.eligibleCount} voted${poll.proxyVoters && poll.proxyVoters.length ? ` (incl. ${poll.proxyVoters.length} absent)` : ''} · ${timeAgo(poll.createdAt)}</div>
           </div>
           ${S.isAdmin ? `<button class="tiny ghost" data-action="delete-poll" data-poll="${poll.id}" title="Delete this vote">🗑️</button>` : ''}
         </div>
@@ -436,6 +457,16 @@
         ui.showAdminLogin = false;
         await refresh();
         toast('Admin tools unlocked ⭐');
+      }
+    } else if (kind === 'absent') {
+      const voterName = val('voterName');
+      const optionId = val('optionId');
+      if (!voterName) return toast("Enter the absent person's name");
+      if (!optionId) return toast('Pick their vote');
+      const key = `absent:name:${f.dataset.poll}`;
+      if (await act('/api/polls/proxy', { pollId: f.dataset.poll, voterName, optionId }, `Added ${voterName}'s vote`)) {
+        delete ui.drafts[key];
+        render();
       }
     } else if (kind === 'note') {
       const text = val('text');
