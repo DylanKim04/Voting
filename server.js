@@ -21,7 +21,8 @@ function seedState() {
   const pos = (name, names) => ({
     id: id(),
     name,
-    lockedCandidateId: null,
+    openings: 1,
+    lockedIds: [],
     candidates: names.map((n) => ({ id: id(), name: n, removed: false, notes: [] })),
   });
   return {
@@ -44,7 +45,17 @@ function load() {
   }
 }
 
-let state = load();
+// Older saves stored a single lockedCandidateId per position.
+function migrate(s) {
+  for (const p of s.positions) {
+    if (!Array.isArray(p.lockedIds)) p.lockedIds = p.lockedCandidateId ? [p.lockedCandidateId] : [];
+    delete p.lockedCandidateId;
+    p.openings = p.openings || 1;
+  }
+  return s;
+}
+
+let state = migrate(load());
 let saveTimer = null;
 
 function save() {
@@ -108,6 +119,7 @@ function viewFor(t, at) {
       candidateId: p.candidateId,
       title: p.title,
       options: p.options,
+      maxPicks: p.maxPicks || 1,
       status: p.status,
       revealed: p.revealed,
       createdAt: p.createdAt,
@@ -119,6 +131,17 @@ function viewFor(t, at) {
       tally: p.revealed ? p.tally : null,
     })),
   };
+}
+
+// A ballot is a list of option ids: 1..maxPicks distinct applicants, or just "abstain".
+function validChoices(poll, body) {
+  const raw = Array.isArray(body.optionIds) ? body.optionIds : [body.optionId];
+  const choices = [...new Set(raw)];
+  const max = poll.maxPicks || 1;
+  need(choices.length > 0 && choices.every((c) => Object.hasOwn(poll.tally, c)), 400, 'Pick one of the options.');
+  need(!(choices.includes('abstain') && choices.length > 1), 400, "Abstain can't be combined with other picks.");
+  need(choices.length <= max, 400, `You can pick up to ${max}.`);
+  return choices;
 }
 
 // ---------- API ----------
@@ -142,7 +165,15 @@ const routes = {
   'POST /api/positions': (body) => {
     const name = cleanText(body.name, 60);
     need(name, 400, 'Position needs a name.');
-    state.positions.push({ id: id(), name, lockedCandidateId: null, candidates: [] });
+    state.positions.push({ id: id(), name, openings: 1, lockedIds: [], candidates: [] });
+  },
+
+  'POST /api/positions/openings': (body) => {
+    const pos = need(findPosition(body.positionId), 404, 'Position not found.');
+    const n = Math.round(Number(body.openings));
+    need(n >= 1 && n <= 10, 400, 'A position can have 1 to 10 spots.');
+    need(pos.lockedIds.length <= n, 400, `${pos.lockedIds.length} people are already locked in — unlock someone first.`);
+    pos.openings = n;
   },
 
   'POST /api/positions/rename': (body) => {
@@ -167,24 +198,34 @@ const routes = {
     const pos = need(findPosition(body.positionId), 404, 'Position not found.');
     const c = need(findCandidate(pos, body.candidateId), 404, 'Applicant not found.');
     c.removed = !!body.removed;
-    if (c.removed && pos.lockedCandidateId === c.id) pos.lockedCandidateId = null;
+    if (c.removed) pos.lockedIds = pos.lockedIds.filter((x) => x !== c.id);
   },
 
   'POST /api/candidates/delete': (body) => {
     const pos = need(findPosition(body.positionId), 404, 'Position not found.');
     pos.candidates = pos.candidates.filter((c) => c.id !== body.candidateId);
-    if (pos.lockedCandidateId === body.candidateId) pos.lockedCandidateId = null;
+    pos.lockedIds = pos.lockedIds.filter((x) => x !== body.candidateId);
   },
 
+  // Lock in one or more applicants (candidateIds), or unlock one (unlockId).
   'POST /api/lock': (body) => {
     const pos = need(findPosition(body.positionId), 404, 'Position not found.');
-    if (body.candidateId) {
-      const c = need(findCandidate(pos, body.candidateId), 404, 'Applicant not found.');
-      need(!c.removed, 400, 'That applicant has been removed.');
-      pos.lockedCandidateId = c.id;
-    } else {
-      pos.lockedCandidateId = null;
+    if (body.unlockId) {
+      pos.lockedIds = pos.lockedIds.filter((x) => x !== body.unlockId);
+      return;
     }
+    const ids = [...new Set(Array.isArray(body.candidateIds) ? body.candidateIds : [body.candidateId])]
+      .filter((cid) => !pos.lockedIds.includes(cid));
+    for (const cid of ids) {
+      const c = need(findCandidate(pos, cid), 404, 'Applicant not found.');
+      need(!c.removed, 400, `${c.name} has been removed.`);
+    }
+    need(
+      pos.lockedIds.length + ids.length <= pos.openings,
+      400,
+      `${pos.name} only has ${pos.openings} ${pos.openings === 1 ? 'spot' : 'spots'} — unlock someone or add a spot first.`
+    );
+    pos.lockedIds.push(...ids);
   },
 
   'POST /api/notes': (body, t) => {
@@ -220,6 +261,7 @@ const routes = {
       poll = {
         type: 'remove',
         candidateId: c.id,
+        maxPicks: 1,
         title: `Remove ${c.name} from ${pos.name}?`,
         options: [
           { id: 'yes', label: `Yes, remove ${c.name}` },
@@ -230,10 +272,13 @@ const routes = {
     } else {
       const active = pos.candidates.filter((c) => !c.removed);
       need(active.length > 0, 400, 'Add some applicants first.');
+      // Each voter may pick as many people as there are open spots.
+      const open = Math.max(1, pos.openings - pos.lockedIds.length);
       poll = {
         type: 'position',
         candidateId: null,
-        title: `Who should be ${pos.name}?`,
+        maxPicks: Math.min(open, active.length),
+        title: open > 1 ? `Who should be ${pos.name}? (pick up to ${Math.min(open, active.length)})` : `Who should be ${pos.name}?`,
         options: [
           ...active.map((c) => ({ id: c.id, label: c.name })),
           { id: 'abstain', label: 'Abstain' },
@@ -259,9 +304,9 @@ const routes = {
     const poll = need(state.polls.find((p) => p.id === body.pollId), 404, 'Vote not found.');
     need(poll.status === 'open', 400, 'This vote is closed.');
     need(!poll.voters.includes(me.id), 400, 'You already voted.');
-    need(Object.hasOwn(poll.tally, body.optionId), 400, 'Pick one of the options.');
+    const choices = validChoices(poll, body);
     poll.voters.push(me.id);
-    poll.tally[body.optionId] += 1;
+    for (const c of choices) poll.tally[c] += 1;
     // Shuffle the voter list so its order can't be matched to tally changes.
     poll.voters.sort(() => Math.random() - 0.5);
   },
@@ -282,9 +327,9 @@ const routes = {
       400,
       `${name} is in the room — they can vote for themselves.`
     );
-    need(Object.hasOwn(poll.tally, body.optionId), 400, 'Pick one of the options.');
+    const choices = validChoices(poll, body);
     poll.proxyVoters.push(name);
-    poll.tally[body.optionId] += 1;
+    for (const c of choices) poll.tally[c] += 1;
   },
 
   'POST /api/polls/close': (body) => {

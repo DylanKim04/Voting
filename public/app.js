@@ -15,7 +15,7 @@
     openNotes: new Set(),
     showAdminLogin: false,
     drafts: {},
-    picked: {}, // pollId -> optionId the user tapped before confirming
+    picked: {}, // pollId -> option ids the user tapped before confirming
   };
 
   // ---------- utilities ----------
@@ -88,6 +88,19 @@
     const same = S.polls.filter((p) => p.positionId === poll.positionId && p.type === 'position');
     return same.length - same.indexOf(poll);
   }
+  // Top vote-getters for a revealed position vote with `spots` openings.
+  // `tie` means more people are tied for the last spot than there is room for.
+  function standings(poll, spots) {
+    const cands = poll.options
+      .filter((o) => o.id !== 'abstain')
+      .map((o) => ({ id: o.id, n: poll.tally[o.id] || 0 }))
+      .sort((a, b) => b.n - a.n);
+    const cutoff = cands[spots - 1] ? cands[spots - 1].n : 0;
+    const leaders = cands.filter((c) => c.n > 0 && c.n >= cutoff).map((c) => c.id);
+    return { leaders, tie: leaders.length > spots };
+  }
+  const spotsWord = (n) => `${n} ${n === 1 ? 'spot' : 'spots'}`;
+
   function latestRemoval(pid, cid) {
     return S.polls.find((p) => p.positionId === pid && p.type === 'remove' && p.candidateId === cid && p.revealed);
   }
@@ -165,7 +178,8 @@
         </div>`;
     }
     const pct = poll.eligibleCount ? Math.min(100, Math.round((poll.votedCount / poll.eligibleCount) * 100)) : 0;
-    const picked = ui.picked[poll.id];
+    const picked = ui.picked[poll.id] || [];
+    const max = poll.maxPicks || 1;
     let body;
     if (!S.me) {
       body = `<div class="hidden-count">Join with your name above to cast a vote.</div>`;
@@ -175,17 +189,18 @@
       body = `
         <div class="options">
           ${poll.options.map((o) => `
-            <button class="option ${o.id === 'abstain' ? 'abstain' : ''} ${picked === o.id ? 'selected' : ''}" data-action="pick" data-poll="${poll.id}" data-option="${o.id}">
-              ${o.id === 'abstain' ? '🤷' : picked === o.id ? '💗' : '○'} ${esc(o.label)}
+            <button class="option ${o.id === 'abstain' ? 'abstain' : ''} ${picked.includes(o.id) ? 'selected' : ''}" data-action="pick" data-poll="${poll.id}" data-option="${o.id}" data-max="${max}">
+              ${o.id === 'abstain' ? '🤷' : picked.includes(o.id) ? '💗' : '○'} ${esc(o.label)}
             </button>`).join('')}
         </div>
-        <button class="primary" data-action="vote" data-poll="${poll.id}" ${picked ? '' : 'disabled'}>Submit my vote</button>
+        <button class="primary" data-action="vote" data-poll="${poll.id}" ${picked.length ? '' : 'disabled'}>Submit my vote${max > 1 && picked.length && !picked.includes('abstain') ? ` (${picked.length} of ${max})` : ''}</button>
         <span class="muted small-text" style="margin-left:8px">You can't change it after submitting.</span>`;
     }
     return `
       <div class="card vote-card">
         <span class="eyebrow"><span class="dot"></span> Voting now</span>
         <h3>${esc(poll.title)}</h3>
+        ${max > 1 ? `<div class="muted small-text">There are ${spotsWord(max)} open — you can vote for up to ${max} people.</div>` : ''}
         ${body}
         <div style="margin-top:16px">
           <div class="vote-meta">
@@ -212,10 +227,14 @@
         </div>
         <form class="absent-form" data-form="absent" data-poll="${poll.id}">
           <input name="voterName" placeholder="Their name" maxlength="60" data-draft="absent:name:${poll.id}" value="${esc(ui.drafts[`absent:name:${poll.id}`] || '')}">
-          <select name="optionId" required>
-            <option value="">Their vote…</option>
-            ${poll.options.map((o) => `<option value="${o.id}">${esc(o.label)}</option>`).join('')}
-          </select>
+          ${(poll.maxPicks || 1) > 1 ? `
+            <div class="absent-picks">
+              ${poll.options.map((o) => `<label class="check"><input type="checkbox" name="optionIds" value="${o.id}"> ${esc(o.label)}</label>`).join('')}
+            </div>` : `
+            <select name="optionId" required>
+              <option value="">Their vote…</option>
+              ${poll.options.map((o) => `<option value="${o.id}">${esc(o.label)}</option>`).join('')}
+            </select>`}
           <button class="small sage" type="submit">Add their vote</button>
         </form>
         ${names.length ? `<div class="member-list">${names.map((n) => `<span class="chip">✓ ${esc(n)}</span>`).join('')}</div>` : ''}
@@ -223,16 +242,17 @@
   }
 
   function candidateView(pos, c, result, hasOpenPoll) {
-    const locked = pos.lockedCandidateId === c.id;
+    const locked = pos.lockedIds.includes(c.id);
+    const full = pos.lockedIds.length >= pos.openings;
     const count = result && result.tally[c.id] !== undefined ? result.tally[c.id] : null;
-    const max = result ? Math.max(...result.options.filter((o) => o.id !== 'abstain').map((o) => result.tally[o.id] || 0)) : 0;
+    const leaders = result ? standings(result, result.maxPicks || 1).leaders : [];
     const removal = latestRemoval(pos.id, c.id);
     const open = ui.openNotes.has(c.id);
     const draftKey = `note:${c.id}`;
 
     let badge;
     if (count === null) badge = `<span class="votes-badge none">${result ? 'not in vote' : 'no votes yet'}</span>`;
-    else badge = `<span class="votes-badge ${count === 0 ? 'none' : count === max ? 'lead' : ''}" title="Round ${roundNumber(result)} result">${count} <span style="font-weight:600">${count === 1 ? 'vote' : 'votes'}</span></span>`;
+    else badge = `<span class="votes-badge ${count === 0 ? 'none' : leaders.includes(c.id) ? 'lead' : ''}" title="Round ${roundNumber(result)} result">${count} <span style="font-weight:600">${count === 1 ? 'vote' : 'votes'}</span></span>`;
 
     return `
       <div class="cand ${locked ? 'locked' : ''} ${c.removed ? 'removed' : ''}">
@@ -249,8 +269,8 @@
         </div>
         ${S.isAdmin ? `
           <div class="cand-actions">
-            ${!c.removed && !locked ? `<button class="tiny sage" data-action="lock" data-pos="${pos.id}" data-cand="${c.id}">👑 Lock in</button>` : ''}
-            ${locked ? `<button class="tiny" data-action="unlock" data-pos="${pos.id}">Unlock</button>` : ''}
+            ${!c.removed && !locked && !full ? `<button class="tiny sage" data-action="lock" data-pos="${pos.id}" data-cand="${c.id}">👑 Lock in</button>` : ''}
+            ${locked ? `<button class="tiny" data-action="unlock" data-pos="${pos.id}" data-cand="${c.id}">Unlock</button>` : ''}
             ${!c.removed ? `<button class="tiny" data-action="remove-vote" data-pos="${pos.id}" data-cand="${c.id}" ${hasOpenPoll ? 'disabled' : ''}>🗳️ Vote to remove</button>` : ''}
             ${!c.removed ? `<button class="tiny danger" data-action="remove" data-pos="${pos.id}" data-cand="${c.id}">Remove</button>`
                           : `<button class="tiny" data-action="restore" data-pos="${pos.id}" data-cand="${c.id}">Restore</button>`}
@@ -278,7 +298,7 @@
   function positionView(pos) {
     const result = latestResult(pos.id);
     const hasOpenPoll = S.polls.some((p) => p.status === 'open');
-    const winner = pos.candidates.find((c) => c.id === pos.lockedCandidateId);
+    const winners = pos.lockedIds.map((cid) => pos.candidates.find((c) => c.id === cid)).filter(Boolean);
     const active = pos.candidates.filter((c) => !c.removed);
     const sorted = [...active, ...pos.candidates.filter((c) => c.removed)];
     const draftKey = `cand:${pos.id}`;
@@ -288,19 +308,29 @@
           <div>
             <span class="position-tag">Position</span>
             <h3>${esc(pos.name)}</h3>
-            <div class="muted small-text">${plural(active.length, 'applicant')}${result ? ` · showing round ${roundNumber(result)} votes` : ''}</div>
+            <div class="muted small-text">${plural(active.length, 'applicant')}${!S.isAdmin && pos.openings > 1 ? ` · ${spotsWord(pos.openings)}` : ''}${result ? ` · showing round ${roundNumber(result)} votes` : ''}</div>
+            ${S.isAdmin ? `
+              <div class="spots">
+                <span class="muted small-text">Spots</span>
+                <button class="tiny" data-action="openings" data-pos="${pos.id}" data-n="${pos.openings - 1}" ${pos.openings <= 1 ? 'disabled' : ''} aria-label="Fewer spots">−</button>
+                <strong>${pos.openings}</strong>
+                <button class="tiny" data-action="openings" data-pos="${pos.id}" data-n="${pos.openings + 1}" ${pos.openings >= 10 ? 'disabled' : ''} aria-label="More spots">+</button>
+              </div>` : ''}
           </div>
           ${S.isAdmin ? `
             <div class="row" style="flex-wrap:wrap;justify-content:flex-end">
-              <button class="small primary" data-action="start-vote" data-pos="${pos.id}" ${hasOpenPoll || !active.length ? 'disabled' : ''}>Start vote</button>
+              <button class="small primary" data-action="start-vote" data-pos="${pos.id}" ${hasOpenPoll || !active.length || winners.length >= pos.openings ? 'disabled' : ''} title="${winners.length >= pos.openings ? 'All spots are filled' : ''}">Start vote</button>
               <button class="small ghost" data-action="rename-pos" data-pos="${pos.id}" title="Rename">✏️</button>
               <button class="small ghost" data-action="delete-pos" data-pos="${pos.id}" title="Delete position">🗑️</button>
             </div>` : ''}
         </div>
-        ${winner ? `
+        ${winners.length ? `
           <div class="winner">
             <span class="crown">👑</span>
-            <div><div class="label">Locked in</div><div class="name">${esc(winner.name)}</div></div>
+            <div>
+              <div class="label">Locked in${pos.openings > 1 ? ` · ${winners.length} of ${pos.openings} spots` : ''}</div>
+              <div class="name">${winners.map((w) => esc(w.name)).join(', ')}</div>
+            </div>
           </div>` : ''}
         <div class="cands">
           ${sorted.map((c) => candidateView(pos, c, result, hasOpenPoll)).join('') || `<div class="empty small-text">No applicants yet.</div>`}
@@ -316,7 +346,10 @@
   function resultView(poll) {
     const pos = position(poll.positionId);
     const total = Object.values(poll.tally || {}).reduce((a, b) => a + b, 0);
+    const spots = poll.maxPicks || 1;
+    const st = poll.revealed && poll.type === 'position' ? standings(poll, spots) : { leaders: [], tie: false };
     const max = poll.revealed ? Math.max(0, ...poll.options.filter((o) => o.id !== 'abstain').map((o) => poll.tally[o.id])) : 0;
+    const isWin = (o, n) => (poll.type === 'position' ? st.leaders.includes(o.id) : o.id !== 'abstain' && n === max && n > 0);
     const cand = poll.type === 'remove' && pos ? pos.candidates.find((c) => c.id === poll.candidateId) : null;
     const removalPassed = poll.revealed && poll.type === 'remove' && poll.tally.yes > poll.tally.no;
     return `
@@ -332,7 +365,7 @@
           const n = poll.tally[o.id] || 0;
           const w = total ? Math.round((n / total) * 100) : 0;
           return `
-            <div class="bar-row ${o.id !== 'abstain' && n === max && n > 0 ? 'win' : ''}">
+            <div class="bar-row ${isWin(o, n) ? 'win' : ''}">
               <span class="lbl" title="${esc(o.label)}">${esc(o.label)}</span>
               <div class="bar"><div style="width:${w}%"></div></div>
               <span class="n">${n}</span>
@@ -345,11 +378,12 @@
           <div class="muted small-text" style="margin-top:6px">${removalPassed ? 'Majority voted to remove.' : 'Majority did not vote to remove.'}</div>
           ${S.isAdmin && removalPassed && cand && !cand.removed ? `<button class="small danger" style="margin-top:8px" data-action="remove" data-pos="${pos.id}" data-cand="${cand.id}">Remove ${esc(cand.name)}</button>` : ''}` : ''}
         ${poll.revealed && poll.type === 'position' && S.isAdmin && pos && max > 0 ? (() => {
-          const leaders = poll.options.filter((o) => o.id !== 'abstain' && poll.tally[o.id] === max);
-          if (leaders.length !== 1) return `<div class="muted small-text" style="margin-top:6px">It's a tie — consider another round.</div>`;
-          const top = pos.candidates.find((c) => c.id === leaders[0].id);
-          if (!top || top.removed || pos.lockedCandidateId === top.id) return '';
-          return `<button class="small sage" style="margin-top:8px" data-action="lock" data-pos="${pos.id}" data-cand="${top.id}">👑 Lock in ${esc(top.name)}</button>`;
+          if (st.tie) return `<div class="muted small-text" style="margin-top:6px">It's a tie${spots > 1 ? ' for the last spot' : ''} — consider another round, or lock people in by hand.</div>`;
+          const top = st.leaders
+            .map((cid) => pos.candidates.find((c) => c.id === cid))
+            .filter((c) => c && !c.removed && !pos.lockedIds.includes(c.id));
+          if (!top.length || pos.lockedIds.length + top.length > pos.openings) return '';
+          return `<button class="small sage" style="margin-top:8px" data-action="lock-many" data-pos="${pos.id}" data-cands="${top.map((c) => c.id).join(',')}">👑 Lock in ${esc(top.map((c) => c.name).join(' & '))}</button>`;
         })() : ''}
       </div>`;
   }
@@ -460,11 +494,13 @@
       }
     } else if (kind === 'absent') {
       const voterName = val('voterName');
-      const optionId = val('optionId');
+      const optionIds = f.elements.optionIds
+        ? [...f.querySelectorAll('input[name=optionIds]:checked')].map((x) => x.value)
+        : [val('optionId')].filter(Boolean);
       if (!voterName) return toast("Enter the absent person's name");
-      if (!optionId) return toast('Pick their vote');
+      if (!optionIds.length) return toast('Pick their vote');
       const key = `absent:name:${f.dataset.poll}`;
-      if (await act('/api/polls/proxy', { pollId: f.dataset.poll, voterName, optionId }, `Added ${voterName}'s vote`)) {
+      if (await act('/api/polls/proxy', { pollId: f.dataset.poll, voterName, optionIds }, `Added ${voterName}'s vote`)) {
         delete ui.drafts[key];
         render();
       }
@@ -513,10 +549,19 @@
       case 'toggle-notes':
         ui.openNotes.has(cand) ? ui.openNotes.delete(cand) : ui.openNotes.add(cand);
         render(); break;
-      case 'pick':
-        ui.picked[poll] = option; render(); break;
+      case 'pick': {
+        const max = Number(b.dataset.max) || 1;
+        let cur = (ui.picked[poll] || []).filter((x) => x !== 'abstain');
+        if (option === 'abstain' || max === 1) cur = (ui.picked[poll] || []).includes(option) ? [] : [option];
+        else if (cur.includes(option)) cur = cur.filter((x) => x !== option);
+        else if (cur.length >= max) { toast(`You can pick up to ${max} — tap one to unselect it first`); break; }
+        else cur.push(option);
+        ui.picked[poll] = cur;
+        render();
+        break;
+      }
       case 'vote':
-        if (ui.picked[poll] && await act('/api/polls/vote', { pollId: poll, optionId: ui.picked[poll] }, 'Vote submitted 🎉')) {
+        if (ui.picked[poll] && ui.picked[poll].length && await act('/api/polls/vote', { pollId: poll, optionIds: ui.picked[poll] }, 'Vote submitted 🎉')) {
           delete ui.picked[poll];
         }
         break;
@@ -531,9 +576,13 @@
       case 'delete-poll':
         if (confirm('Delete this vote and its results?')) await act('/api/polls/delete', { pollId: poll }); break;
       case 'lock':
-        await act('/api/lock', { positionId: pos, candidateId: cand }, `👑 ${c ? c.name : 'Applicant'} locked in for ${p ? p.name : ''}`); break;
+        await act('/api/lock', { positionId: pos, candidateIds: [cand] }, `👑 ${c ? c.name : 'Applicant'} locked in for ${p ? p.name : ''}`); break;
+      case 'lock-many':
+        await act('/api/lock', { positionId: pos, candidateIds: b.dataset.cands.split(',') }, `👑 Locked in for ${p ? p.name : ''}`); break;
       case 'unlock':
-        await act('/api/lock', { positionId: pos, candidateId: null }); break;
+        await act('/api/lock', { positionId: pos, unlockId: cand }); break;
+      case 'openings':
+        await act('/api/positions/openings', { positionId: pos, openings: Number(b.dataset.n) }); break;
       case 'remove':
         if (confirm(`Remove ${c ? c.name : 'this applicant'} from ${p ? p.name : 'this position'}?`)) {
           await act('/api/candidates/remove', { positionId: pos, candidateId: cand, removed: true }, 'Removed');

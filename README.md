@@ -20,6 +20,9 @@ send one link in the group chat, everyone joins with their name, and votes are c
   someone who's absent: type their name and pick their choice. The name is listed so nobody gets
   counted twice, but the choice goes into the anonymous tally like everyone else's.
 - **Lock in a winner.** Once the votes settle, an admin locks one person in for the role. 👑
+- **Positions with more than one opening.** Admins use the **Spots − / +** control on a position to set
+  how many people it takes. Voters can then pick up to that many people, and admins can lock in that many
+  (a **Lock in A & B** button appears for the top vote-getters).
 - **Live updates.** Everyone's screen updates on its own. No refreshing.
 
 ## Running a meeting

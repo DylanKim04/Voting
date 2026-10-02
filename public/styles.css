@@ -235,3 +235,10 @@ textarea { resize: vertical; min-height: 44px; }
 .absent-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; margin-bottom: 8px; }
 .absent-form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; }
 @media (max-width: 560px) { .absent-form { grid-template-columns: 1fr; } }
+
+/* ---------- multiple spots ---------- */
+.spots { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; }
+.spots strong { min-width: 16px; text-align: center; }
+.absent-picks { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; grid-column: span 1; }
+.check { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; cursor: pointer; }
+.check input { width: auto; }
