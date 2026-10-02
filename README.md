@@ -35,6 +35,12 @@ send one link in the group chat, everyone joins with their name, and votes are c
 
 Only one vote can be open at a time. That keeps everyone focused on the same question.
 
+## Try it in GitHub Codespaces (no setup)
+
+On GitHub, open **Code → Codespaces → Create codespace** on this branch. The Codespace pulls
+the latest code, starts the app and opens it in a new tab by itself. To get a newer version later,
+stop and restart the Codespace (or just create a new one).
+
 ## Run it on your computer
 
 Requires [Node.js](https://nodejs.org) 18 or newer. There's nothing to install.

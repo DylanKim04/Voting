@@ -1,0 +1,12 @@
+{
+  "name": "AASA Voting",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  // Every time the Codespace starts, grab the latest code...
+  "postStartCommand": "git pull --ff-only || true",
+  // ...and start the app as soon as you open it.
+  "postAttachCommand": "npm start",
+  "forwardPorts": [3000],
+  "portsAttributes": {
+    "3000": { "label": "Voting app", "onAutoForward": "openBrowser" }
+  }
+}
